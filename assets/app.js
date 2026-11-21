@@ -21,6 +21,97 @@ const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp
 const norm = (v) => String(v ?? '').toLocaleLowerCase('th-TH').replace(/\s+/g, '').trim();
 const svgNS = 'http://www.w3.org/2000/svg';
 
+/* Province autocomplete: substring matching across all 77 names plus familiar aliases. */
+const PROVINCE_ALIASES = {
+  '10': ['กทม', 'กทม.', 'กรุงเทพ', 'บางกอก', 'Bangkok'],
+  '14': ['อยุธยา', 'กรุงเก่า'],
+  '30': ['โคราช']
+};
+let suggestionMatches = [];
+let activeSuggestionIndex = -1;
+function normalizeProvinceQuery(value) {
+  return norm(value).replace(/^จังหวัด/, '').replace(/^จ\./, '').replace(/[.ฯ]/g, '');
+}
+function matchingProvinces(value) {
+  const query = normalizeProvinceQuery(value);
+  if (!query) return [];
+  return state.provinces.map(province => {
+    const terms = [province.name, ...(PROVINCE_ALIASES[province.code] || [])];
+    let score = Infinity;
+    for (const [index, term] of terms.entries()) {
+      const name = normalizeProvinceQuery(term);
+      if (name === query) score = Math.min(score, index ? 1 : 0);
+      else if (name.startsWith(query)) score = Math.min(score, index ? 3 : 2);
+      else if (name.includes(query)) score = Math.min(score, index ? 5 : 4);
+    }
+    return { ...province, score };
+  }).filter(province => Number.isFinite(province.score))
+    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, 'th'));
+}
+function closeProvinceSuggestions() {
+  suggestionMatches = [];
+  activeSuggestionIndex = -1;
+  el('province-suggestions').hidden = true;
+  el('province-suggestions').innerHTML = '';
+  el('province-search').setAttribute('aria-expanded', 'false');
+  el('province-search').removeAttribute('aria-activedescendant');
+}
+function renderProvinceSuggestions() {
+  const box = el('province-suggestions');
+  const input = el('province-search');
+  suggestionMatches = matchingProvinces(input.value);
+  activeSuggestionIndex = -1;
+  if (!suggestionMatches.length) { closeProvinceSuggestions(); return; }
+  const first = suggestionMatches.slice(0, 8);
+  box.innerHTML = first.map(province => `<button type="button" role="option" aria-selected="false" id="province-suggestion-${escapeHtml(province.code)}" class="province-suggestion" data-province-code="${escapeHtml(province.code)}"><strong>${escapeHtml(province.name)}</strong><small>เลือกดูข้อมูล ↗</small></button>`).join('') +
+    (suggestionMatches.length > first.length ? `<p class="province-suggestions-hint" role="presentation">พบ ${suggestionMatches.length} จังหวัด · พิมพ์เพิ่มเพื่อค้นหาให้ตรงขึ้น</p>` : '');
+  box.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+  input.removeAttribute('aria-activedescendant');
+}
+function chooseProvinceSuggestion(code) {
+  const province = getProvince(code);
+  if (!province) return;
+  const input = el('province-search');
+  input.value = province.name;
+  input.blur(); // Dismiss the iPhone keyboard before scrolling to the details.
+  state.query = province.name;
+  state.filter = 'all';
+  state.category = 'all';
+  el('category-filter').value = 'all';
+  document.querySelectorAll('.segment').forEach(button => {
+    const selected = button.dataset.filter === 'all';
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  closeProvinceSuggestions();
+  update();
+  selectProvince(province.code);
+}
+function handleSuggestionKeys(event) {
+  if (event.isComposing) return;
+  if (event.key === 'Escape') { closeProvinceSuggestions(); return; }
+  if (el('province-suggestions').hidden || !suggestionMatches.length) return;
+  const visible = Math.min(suggestionMatches.length, 8);
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    activeSuggestionIndex = (activeSuggestionIndex + (event.key === 'ArrowDown' ? 1 : -1) + visible) % visible;
+    el('province-suggestions').querySelectorAll('.province-suggestion').forEach((option, index) => {
+      const active = index === activeSuggestionIndex;
+      option.classList.toggle('active', active);
+      option.setAttribute('aria-selected', String(active));
+      if (active) {
+        el('province-search').setAttribute('aria-activedescendant', option.id);
+        option.scrollIntoView({block:'nearest'});
+      }
+    });
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    chooseProvinceSuggestion(suggestionMatches[activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0].code);
+  }
+}
+
+
 function liveStatus(value) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'unknown';
   if (value <= 15) return 'airExcellent';
@@ -234,6 +325,7 @@ function setLayer(layer) {
   if (!['water','air','air-live'].includes(layer)) return;
   state.layer = layer; state.filter = 'all'; state.category = 'all'; state.query = '';
   el('province-search').value = ''; el('category-filter').value = 'all';
+  closeProvinceSuggestions();
   el('category-filter').hidden = layer !== 'water';
   document.querySelectorAll('[data-layer]').forEach(btn => { const on = btn.dataset.layer === layer; btn.classList.toggle('selected', on); btn.setAttribute('aria-pressed', String(on)); });
   document.querySelectorAll('.segment').forEach(btn => { const on = btn.dataset.filter === 'all'; btn.classList.toggle('selected', on); btn.setAttribute('aria-pressed', String(on)); });
@@ -254,8 +346,17 @@ function setLayer(layer) {
 }
 function attachFilters() {
   document.querySelectorAll('[data-layer]').forEach(btn => btn.addEventListener('click', () => setLayer(btn.dataset.layer)));
-  el('province-picker').addEventListener('change', e => { if (e.target.value) selectProvince(e.target.value); });
-  el('province-search').addEventListener('input', e => { state.query = e.target.value; update(); });
+  el('province-picker').addEventListener('change', e => { if (e.target.value) { state.query = ''; el('province-search').value = ''; closeProvinceSuggestions(); update(); selectProvince(e.target.value); } });
+  el('province-search').addEventListener('input', e => { state.query = e.target.value; update(); renderProvinceSuggestions(); });
+  el('province-search').addEventListener('focus', () => { if (el('province-search').value.trim()) renderProvinceSuggestions(); });
+  el('province-search').addEventListener('keydown', handleSuggestionKeys);
+  el('province-suggestions').addEventListener('click', event => {
+    const option = event.target.closest('[data-province-code]');
+    if (option) chooseProvinceSuggestion(option.dataset.provinceCode);
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!el('province-search').closest('.search-holder').contains(event.target)) closeProvinceSuggestions();
+  });
   el('category-filter').addEventListener('change', e => { state.category = e.target.value; update(); });
   document.querySelectorAll('.segment').forEach(btn => btn.addEventListener('click', () => {
     state.filter = btn.dataset.filter;
@@ -265,6 +366,7 @@ function attachFilters() {
   el('reset-filter').addEventListener('click', () => {
     state.filter = 'all'; state.category = 'all'; state.query = '';
     el('province-search').value = ''; el('category-filter').value = 'all';
+    closeProvinceSuggestions();
     document.querySelectorAll('.segment').forEach(b => { const active = b.dataset.filter === 'all'; b.classList.toggle('selected', active); b.setAttribute('aria-pressed', String(active)); });
     update();
   });

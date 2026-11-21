@@ -15,5 +15,7 @@ jobs:
           python-version: '3.12'
       - name: Validate incident dataset
         run: python tests/validate_data.py
+      - name: Validate GISTDA importer (synthetic fixture only)
+        run: python tests/validate_pm25.py
       - name: Check JavaScript syntax
         run: node --check assets/app.js

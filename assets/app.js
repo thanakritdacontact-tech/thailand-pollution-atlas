@@ -8,15 +8,29 @@ const STATUS = {
   exceeded: { label: 'มีผลตรวจเกินเกณฑ์บางจุด', color: '#e77878', rank: 3, short: 'ผลตรวจเกินเกณฑ์' },
   watch: { label: 'พื้นที่เฝ้าระวัง', color: '#76a2da', rank: 2, short: 'เฝ้าระวัง' },
   reported: { label: 'มีรายงานเหตุการณ์', color: '#eaba76', rank: 1, short: 'รายงานเหตุการณ์' },
+  airExcellent: { label: 'PM2.5 ดีมาก (ค่าเฉลี่ย 24 ชม.)', color: '#2d8bd4', rank: 1, short: 'ดีมาก' },
+  airGood: { label: 'PM2.5 ดี (ค่าเฉลี่ย 24 ชม.)', color: '#60bd8d', rank: 2, short: 'ดี' },
+  airModerate: { label: 'PM2.5 ปานกลาง (ค่าเฉลี่ย 24 ชม.)', color: '#edcb62', rank: 3, short: 'ปานกลาง' },
+  airImpact: { label: 'PM2.5 เริ่มมีผลกระทบต่อสุขภาพ (ค่าเฉลี่ย 24 ชม.)', color: '#ec9d52', rank: 4, short: 'เริ่มกระทบสุขภาพ' },
+  airSevere: { label: 'PM2.5 มีผลกระทบต่อสุขภาพ (ค่าเฉลี่ย 24 ชม.)', color: '#e77878', rank: 5, short: 'กระทบสุขภาพ' },
   unknown: { label: 'ไม่มีข้อมูลในชุดนี้', color: '#dce5eb', rank: 0, short: 'ไม่มีข้อมูล' }
 };
-const state = { events: [], provinces: [], byCode: new Map(), features: [], selected: null, filter: 'all', category: 'all', query: '', layer: 'water' };
+const state = { events: [], provinces: [], byCode: new Map(), features: [], selected: null, filter: 'all', category: 'all', query: '', layer: 'water', latest: new Map(), latestMeta: null, latestError: null, latestStale: false };
 const el = (id) => document.getElementById(id);
 const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const norm = (v) => String(v ?? '').toLocaleLowerCase('th-TH').replace(/\s+/g, '').trim();
 const svgNS = 'http://www.w3.org/2000/svg';
 
+function liveStatus(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'unknown';
+  if (value <= 15) return 'airExcellent';
+  if (value <= 25) return 'airGood';
+  if (value <= 37.5) return 'airModerate';
+  if (value <= 75) return 'airImpact';
+  return 'airSevere';
+}
 function getStatus(code) {
+  if (state.layer === 'air-live') return state.latestStale ? 'unknown' : liveStatus(state.latest.get(String(code))?.pm25Avg24hr);
   const events = eventsFor(code);
   return events.reduce((best, event) => STATUS[event.status].rank > STATUS[best].rank ? event.status : best, 'unknown');
 }
@@ -24,6 +38,10 @@ function eventsFor(code) { return (state.byCode.get(String(code)) || []).filter(
 function getProvince(code) { return state.provinces.find(x => String(x.code) === String(code)); }
 function getFilteredCodes() {
   const codes = new Set();
+  if (state.layer === 'air-live') {
+    state.provinces.forEach(prov => { if (!state.query || norm(prov.name).includes(norm(state.query))) codes.add(prov.code); });
+    return codes;
+  }
   state.provinces.forEach(prov => {
     const list = eventsFor(prov.code);
     const status = getStatus(prov.code);
@@ -35,6 +53,18 @@ function getFilteredCodes() {
   return codes;
 }
 function updateStats() {
+  if (state.layer === 'air-live') {
+    const valid = [...state.latest.values()].filter(x => typeof x.pm25Avg24hr === 'number' && Number.isFinite(x.pm25Avg24hr));
+    el('count-all').textContent = String(state.provinces.length || 77);
+    el('count-covered').textContent = String(state.latestStale ? 0 : valid.length);
+    el('count-exceeded').textContent = String(state.latestStale ? 0 : valid.filter(x => x.pm25Avg24hr > 37.5).length);
+    el('count-reports').textContent = String(state.latestStale ? 0 : valid.length);
+    el('stat-covered-title').textContent = 'จังหวัดที่มีค่า PM2.5 ล่าสุด';
+    el('stat-exceeded-title').textContent = 'ค่าเฉลี่ย 24 ชม. > 37.5';
+    el('stat-report-title').textContent = 'รายการตัวเลขจาก GISTDA';
+    el('tab-all').textContent = String(state.provinces.length || 77);
+    return;
+  }
   const counts = { exceeded: 0, watch: 0, reported: 0, unknown: 0 };
   state.provinces.forEach(p => counts[getStatus(p.code)]++);
   el('count-all').textContent = String(state.provinces.length || 77);
@@ -112,6 +142,25 @@ function provinceLinks() {
      <a href="https://www.air4thai.com/" rel="noopener noreferrer" target="_blank">Air4Thai ตรวจฝุ่นล่าสุด ↗</a>
      <a href="https://data.go.th/" rel="noopener noreferrer" target="_blank">Open Government Data ↗</a></div>`;
 }
+function liveTimeText() {
+  const m = state.latestMeta;
+  return m ? `${escapeHtml(m.source_date_thai || 'ไม่ระบุวันที่')} ${escapeHtml(m.source_time_thai || 'ไม่ระบุเวลา')}` : 'ยังไม่ทราบเวลา';
+}
+function renderLiveDetails(province) {
+  const reading = state.latest.get(province.code);
+  if (!reading || state.latestStale) {
+    const detail = state.latestStale ? 'ข้อมูลจากรอบดึงล่าสุดเก่ากว่า 12 ชั่วโมง จึงไม่แสดงเป็นค่าปัจจุบัน' : 'ยังไม่มีข้อมูลฉบับล่าสุดจาก GISTDA บนเว็บไซต์นี้';
+    return `${statusLabel('unknown')}<p class="detail-hint">${escapeHtml(detail)} · ไม่ใช่หลักฐานว่าจังหวัดนี้มีอากาศดี</p><a class="source-button" target="_blank" rel="noopener noreferrer" href="https://pm25.gistda.or.th/">ตรวจ GISTDA ต้นทาง ↗</a>` + provinceLinks();
+  }
+  const num = (x) => Number(x).toFixed(1);
+  const cls = liveStatus(reading.pm25Avg24hr);
+  return `${statusLabel(cls)}<p class="detail-hint">GISTDA เช็คฝุ่น · ข้อมูลภาพรวมจังหวัดจากดาวเทียมผสานข้อมูลภาคพื้นดิน ไม่ใช่การวัดจากทุกถนนหรือทุกบ้าน</p>
+   <div class="live-reading"><small>PM2.5 เฉลี่ย 24 ชั่วโมง</small><strong>${num(reading.pm25Avg24hr)}</strong><span>µg/m³</span></div>
+   <div class="detail-metadata"><div><small>ค่ารายงาน PM2.5 อีกช่องของ API</small><b>${num(reading.pm25)} µg/m³</b></div><div><small>เวลาอ้างอิงที่ GISTDA ระบุ (ไทย)</small><b>${liveTimeText()}</b></div></div>
+   <p class="detail-hint"><strong>เกณฑ์มาตรฐานเฉลี่ย 24 ชม. ของไทย:</strong> ไม่เกิน 37.5 µg/m³ · สถานะสีประเมินจากค่าเฉลี่ย 24 ชม. เท่านั้น ไม่ใช่ค่า AQI ที่คำนวณจากสารอื่น</p>
+   <a class="source-button" target="_blank" rel="noopener noreferrer" href="https://pm25.gistda.or.th/rest/getPm25byProvince">เปิดข้อมูล JSON ต้นทาง ↗</a>
+   <div class="detail-caution"><strong>ข้อจำกัด:</strong> ค่า PM2.5 ที่เผยแพร่โดย GISTDA อาศัยการวิเคราะห์ข้อมูลดาวเทียมประกอบสถานีภาคพื้นดิน ใช้ดูภาพรวม ไม่ใช่หลักฐานสารหนู/ปรอท/สารพิษในน้ำ และไม่ใช่การตรวจทุกจุดในจังหวัด</div>` + provinceLinks();
+}
 function renderDetails() {
   const province = getProvince(state.selected);
   el('detail-code').textContent = province ? `TH-${province.code}` : 'TH';
@@ -120,6 +169,7 @@ function renderDetails() {
     el('detail-content').innerHTML = '<p class="detail-intro">เลือกจังหวัดบนแผนที่ หรือในรายการ 77 จังหวัด เพื่อดูหลักฐานในชั้นข้อมูลที่เลือก</p><div class="detail-empty"><b>คลิกจังหวัดเพื่อสำรวจ</b>ข้อมูลพร้อมวันที่และลิงก์ตรวจสอบ</div>';
     return;
   }
+  if (state.layer === 'air-live') { el('detail-content').innerHTML = renderLiveDetails(province); return; }
   const list = eventsFor(province.code);
   const otherLayer = state.layer === 'water' ? 'air' : 'water';
   const otherCount = (state.byCode.get(province.code) || []).filter(e => e.layer === otherLayer).length;
@@ -132,21 +182,66 @@ function renderDetails() {
   el('detail-content').innerHTML = `${statusLabel(getStatus(province.code))}<p class="detail-hint">${escapeHtml(context)} · พบ ${list.length} รายการ ${otherCount ? `· อีกชั้นข้อมูลมี ${otherCount} รายการ` : ''}</p>` + list.map((e, i) => `<article class="detail-event"><div class="event-topline">SOURCE RECORD ${String(i + 1).padStart(2, '0')} · ${escapeHtml(e.category)}</div><h4>${escapeHtml(e.headline)}</h4><p>${escapeHtml(e.finding)}</p><div class="detail-metadata"><div><small>พื้นที่ / ขอบเขตข้อมูล</small><b>${escapeHtml(e.area)}</b></div><div><small>ช่วงเวลาตรวจ/เหตุการณ์</small><b>${escapeHtml(e.sample_date)}</b></div><div><small>พารามิเตอร์</small><b>${escapeHtml(e.substance)}</b></div><div><small>วันที่รายงาน</small><b>${escapeHtml(e.report_date)}</b></div></div><a class="source-button" href="${escapeHtml(e.source_url)}" target="_blank" rel="noopener noreferrer">เปิดเอกสารต้นทาง ↗</a><div class="detail-caution"><strong>ข้อจำกัดการใช้ข้อมูล:</strong> ${escapeHtml(e.limitation)}</div></article>`).join('') + provinceLinks();
 }
 function renderRecords() {
+  if (state.layer === 'air-live') {
+    const records = state.provinces.map(p => ({...p, reading:state.latest.get(p.code)}))
+       .filter(p => !state.query || norm(p.name).includes(norm(state.query)))
+       .sort((a,b) => ((b.reading?.pm25Avg24hr ?? -1) - (a.reading?.pm25Avg24hr ?? -1)));
+    const valid = records.filter(p => p.reading && Number.isFinite(p.reading.pm25Avg24hr));
+    el('results-count').textContent = `มีค่าจาก API ${state.latest.size}/77 จังหวัด · ${state.latestStale ? 'ข้อมูลเก่า ไม่แสดงสี' : liveTimeText()}`;
+    el('record-list').innerHTML = state.latestStale || !valid.length
+       ? `<div class="empty-results">${state.latestStale ? 'ข้อมูลดึงล่าสุดเก่ากว่า 12 ชั่วโมง' : 'ข้อมูล PM2.5 ล่าสุดยังไม่พร้อม'} — เปิดตรวจ <a href="https://pm25.gistda.or.th/" target="_blank" rel="noopener noreferrer">ระบบ GISTDA ↗</a></div>`
+       : records.map(p => `<article class="record-card"><div class="record-card-top"><span class="record-province">${escapeHtml(p.name)}</span>${p.reading ? statusLabel(liveStatus(p.reading.pm25Avg24hr)) : statusLabel('unknown')}</div><h4>${p.reading ? `${Number(p.reading.pm25Avg24hr).toFixed(1)} µg/m³` : 'ยังไม่มีค่า'}</h4><p>PM2.5 เฉลี่ย 24 ชม. · GISTDA เช็คฝุ่น</p><div class="record-card-bottom"><span class="record-date">${liveTimeText()}</span><a href="?layer=air-live&province=${encodeURIComponent(p.code)}">ดูรายละเอียด ↗</a></div></article>`).join('');
+    return;
+  }
   const codes = getFilteredCodes();
   const records = state.events.filter(e => e.layer === state.layer && codes.has(e.province_code) && (state.filter === 'all' || state.filter === getStatus(e.province_code)) && (state.category === 'all' || e.category === state.category) && (!state.query || norm([e.province, e.area, e.headline, e.substance, e.finding].join(' ')).includes(norm(state.query))));
   const size = state.events.filter(e => e.layer === state.layer).length;
   el('results-count').textContent = `แสดง ${records.length} จาก ${size} รายการในชั้นนี้`;
   el('record-list').innerHTML = records.length ? records.map(e => `<article class="record-card"><div class="record-card-top"><span class="record-province">${escapeHtml(e.province)}</span>${statusLabel(e.status)}</div><h4>${escapeHtml(e.headline)}</h4><p>${escapeHtml(e.area)} · ${escapeHtml(e.substance)}</p><div class="record-card-bottom"><span class="record-date">รายงาน ${escapeHtml(e.report_date)}</span><a href="${escapeHtml(e.source_url)}" target="_blank" rel="noopener noreferrer">ดูแหล่งข้อมูล ↗</a></div></article>`).join('') : '<div class="empty-results">ไม่พบรายงานที่ตรงกับตัวกรองนี้ ลองเปลี่ยนสถานะ ประเภท หรือคำค้นหา</div>';
 }
-function update() { updateStats(); updateMapColors(); renderDetails(); renderRecords(); }
+function updateLiveBanner() {
+  if (state.layer !== 'air-live') return;
+  const label = state.latestMeta ? `ข้อมูล GISTDA: ${liveTimeText()} · ดึงโดย GitHub Pages ตามรอบเวลา` : 'กำลังตรวจชุดข้อมูล GISTDA ล่าสุด...';
+  el('live-time-banner').textContent = state.latestError ? `ไม่สามารถดึงข้อมูลล่าสุดได้: ${state.latestError}. เปิดดูที่ GISTDA ต้นทาง` : state.latestStale ? `คำเตือน: ข้อมูลเก่ากว่า 12 ชั่วโมง · ${label} · ไม่แสดงสีปัจจุบัน` : label;
+}
+function update() { updateStats(); updateLiveBanner(); updateMapColors(); renderDetails(); renderRecords(); }
+async function loadLatestAir() {
+  try {
+    const res = await fetch('data/pm25-latest.json', {cache:'no-store'});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data.data) || data.data.length !== 77 || !data.fetched_at_utc) throw new Error('ข้อมูลไม่ครบ 77 จังหวัด');
+    const map = new Map();
+    for (const r of data.data) {
+      const code = String(r.pv_idn).padStart(2,'0');
+      if (map.has(code) || !getProvince(code) || !Number.isFinite(r.pm25Avg24hr) || !Number.isFinite(r.pm25)) throw new Error(`ข้อมูลไม่ถูกต้อง: ${code}`);
+      map.set(code, r);
+    }
+    const age = Date.now() - Date.parse(data.fetched_at_utc);
+    if (!Number.isFinite(age)) throw new Error('เวลาการดึงข้อมูลไม่ถูกต้อง');
+    state.latest = map;
+    state.latestMeta = data;
+    state.latestStale = age > 12 * 3600000 || age < -30 * 60000;
+    state.latestError = null;
+  } catch(err) {
+    state.latest.clear(); state.latestMeta = null; state.latestStale = false;
+    state.latestError = String(err.message || err).slice(0,100);
+  }
+  if (state.layer === 'air-live') update();
+}
+
 function setLayer(layer) {
-  if (!['water','air'].includes(layer)) return;
+  if (!['water','air','air-live'].includes(layer)) return;
   state.layer = layer; state.filter = 'all'; state.category = 'all'; state.query = '';
   el('province-search').value = ''; el('category-filter').value = 'all';
-  el('category-filter').hidden = layer === 'air';
+  el('category-filter').hidden = layer !== 'water';
   document.querySelectorAll('[data-layer]').forEach(btn => { const on = btn.dataset.layer === layer; btn.classList.toggle('selected', on); btn.setAttribute('aria-pressed', String(on)); });
   document.querySelectorAll('.segment').forEach(btn => { const on = btn.dataset.filter === 'all'; btn.classList.toggle('selected', on); btn.setAttribute('aria-pressed', String(on)); });
-  el('layer-description').textContent = layer === 'air' ? 'PM2.5 ย้อนหลังปี 2568: แดง = อยู่ในรายชื่อ 57 จังหวัดที่เคยถึงระดับกระทบสุขภาพ; เทา = ไม่อยู่ในรายชื่อ ไม่ใช่ปลอดภัย' : 'น้ำ/กากอุตสาหกรรม: สีแสดงเฉพาะรายงานที่บันทึกไว้ ไม่ใช่ผลวัดสารพิษทั้งจังหวัด';
+  el('layer-description').textContent = layer === 'air-live' ? 'GISTDA เช็คฝุ่น: ค่า PM2.5 เฉลี่ย 24 ชั่วโมง รายจังหวัด; โหลดชุดล่าสุดผ่าน GitHub Pages ทุก 3 ชั่วโมง (อาจล่าช้าหรือขัดข้องได้)' : layer === 'air' ? 'PM2.5 ย้อนหลังปี 2568: แดง = อยู่ในรายชื่อ 57 จังหวัดที่เคยถึงระดับกระทบสุขภาพ; เทา = ไม่อยู่ในรายชื่อ ไม่ใช่ปลอดภัย' : 'น้ำ/กากอุตสาหกรรม: สีแสดงเฉพาะรายงานที่บันทึกไว้ ไม่ใช่ผลวัดสารพิษทั้งจังหวัด';
+  el('legacy-segments').hidden = layer === 'air-live';
+  el('historical-legend').hidden = layer === 'air-live';
+  el('live-legend').hidden = layer !== 'air-live';
+  el('live-time-banner').hidden = layer !== 'air-live';
   el('tab-exceeded-label').textContent = layer === 'air' ? 'เคยถึงระดับสีแดง' : 'เกินเกณฑ์ที่จุดตรวจ';
   el('tab-watch-button').hidden = layer === 'air';
   el('tab-reported-button').hidden = layer === 'air';
@@ -154,6 +249,7 @@ function setLayer(layer) {
   el('legend-watch').hidden = layer === 'air'; el('legend-reported').hidden = layer === 'air';
   el('legend-unknown-label').textContent = layer === 'air' ? 'ไม่อยู่ในรายชื่อ (ไม่ใช่ปลอดภัย)' : 'ไม่พบข้อมูลในชุดนี้';
   const url = new URL(location.href); url.searchParams.set('layer', layer); history.replaceState(null, '', url);
+  updateLiveBanner();
   update();
 }
 function attachFilters() {
@@ -207,11 +303,12 @@ async function initialize() {
     for (const code of state.byCode.keys()) if (!getProvince(code)) throw new Error(`ไม่พบรหัสจังหวัด ${code} ในแผนที่`);
     drawMap();
     const requestedLayer = new URL(location.href).searchParams.get('layer');
-    setLayer(requestedLayer === 'air' ? 'air' : 'water');
+    setLayer(['water','air','air-live'].includes(requestedLayer) ? requestedLayer : 'water');
     const requested = new URL(location.href).searchParams.get('province');
     if (requested && getProvince(requested)) { state.selected = requested; el('province-picker').value = requested; }
     renderDetails(); renderRecords(); updateMapColors();
     el('map-loading').hidden = true;
+    loadLatestAir();
   } catch (err) {
     console.error('Initialize failed', err);
     el('map-loading').textContent = 'โหลดแผนที่หรือข้อมูลไม่สำเร็จ กรุณาเช็กอินเทอร์เน็ตและรีเฟรชหน้าเว็บ';

@@ -23,3 +23,14 @@
 .live-reading{display:flex;align-items:baseline;gap:12px;margin:19px 0 10px;border-radius:10px;background:#edf5fc;padding:18px;flex-wrap:wrap}
 .live-reading small{flex:1 0 100%;font-size:12px;color:#5a7992;font-weight:700}.live-reading strong{font:800 42px/1.1 'DM Sans',sans-serif;color:#25516f}.live-reading span{color:#5a7992}
 @media(max-width:600px){.live-reading strong{font-size:34px}}
+
+/* Province search autocomplete (touch-friendly and accessible on mobile) */
+.search-holder{z-index:2}
+.province-suggestions{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:30;max-height:min(340px,42vh);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;background:#fff;border:1px solid #d6e4f0;border-radius:12px;box-shadow:0 12px 32px #18395324;padding:6px}
+.province-suggestion{display:flex;width:100%;min-height:48px;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:0;border-radius:8px;background:transparent;text-align:left;color:#244760;cursor:pointer}
+.province-suggestion strong{font-size:14px;font-weight:700}
+.province-suggestion small{font-size:11px;color:#7890a4;white-space:nowrap}
+.province-suggestion:hover,.province-suggestion.active,.province-suggestion:focus-visible{background:#edf5ff;outline:0}
+.province-suggestion.active{box-shadow:inset 3px 0 0 #5087cb}
+.province-suggestions-hint{margin:4px 8px 6px;padding:8px 5px 2px;border-top:1px solid #edf1f6;color:#71869c;font-size:11px;line-height:1.7}
+@media(max-width:580px){.search-holder input{font-size:16px}.province-suggestions{max-height:min(310px,38vh)}.province-suggestion{min-height:52px}}

@@ -4,3 +4,17 @@
 @media(max-width:850px){.rail{width:57px}.main{width:calc(100% - 57px);margin-left:57px;padding:0 20px}.rail-logo{font-size:22px}.rail-link{width:37px;height:37px}.topbar{height:62px}.breadcrumbs{font-size:9px}.top-right .source-quick{display:none}.hero{padding:27px 0 25px}.workspace-grid{grid-template-columns:1fr}.map-wrap{height:600px}.detail-content{max-height:none}.record-list{grid-template-columns:1fr}.source-cards{grid-template-columns:1fr 1fr}}
 @media(max-width:580px){.rail{width:0;display:none}.main{width:100%;margin-left:0;padding:0 15px}.topbar{height:56px}.breadcrumbs .slash,.breadcrumbs strong{display:none}.top-right{font-size:10px}.eyebrow{font-size:9px}.hero{padding:23px 0}.hero-sub{font-size:12px;line-height:1.85}.disclaimer{font-size:11px}.stats{gap:9px;margin:16px 0 30px}.stat-card{padding:13px}.stat-heading{font-size:10px}.stat-heading span{display:none}.stat-number{font-size:31px;margin-top:10px}.stat-bottom{font-size:10px;line-height:1.55}.section-note{display:none}h2{font-size:20px}.filterbar{flex-wrap:wrap}.search-holder{flex:1 0 100%}.filterbar select{flex:1;min-width:170px}.reset-btn{white-space:nowrap}.segmented{flex-wrap:nowrap;overflow-x:auto;padding-bottom:7px;margin-right:-15px;scrollbar-width:thin}.segment{white-space:nowrap;font-size:11px}.map-top{font-size:8px;padding:14px 13px 8px}.map-wrap{height:550px;min-height:550px}.map-credit{font-size:9px;line-height:1.6}.map-legend{font-size:10px}.detail-header{padding:19px}.detail-content{padding:19px}.source-cards{grid-template-columns:1fr}.record-card{padding:17px}footer{align-items:flex-start;flex-direction:column;line-height:1.7}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* v2: explicit historical evidence layers and all-province directory */
+.layer-bar{display:flex;gap:9px;flex-wrap:wrap;margin:16px 0 8px}
+.layer-choice{border:1px solid #d8e3ee;background:#fff;padding:12px 16px;border-radius:10px;font-weight:650;color:#5a728a}
+.layer-choice.selected{background:#244e78;border-color:#244e78;color:#fff}
+.layer-choice:focus-visible,.segment:focus-visible,.province-shape:focus-visible{outline:3px solid #e6a552;outline-offset:2px}
+.layer-description{font-size:12px;color:#71879b;margin:0 0 18px;line-height:1.85}
+#province-picker{width:220px;flex:0 1 220px}
+.registry-links{border-top:1px solid #e5edf3;margin-top:24px;padding-top:17px;display:flex;flex-direction:column;align-items:flex-start;gap:10px;font-size:11px;color:#6b8296}
+.registry-links>a,.public-note a{color:#256ba3;font-weight:700;text-decoration:underline;text-underline-offset:2px}
+.public-note{border-top:1px solid #e5edf3;font-size:12px;color:#647c91;line-height:2;padding:19px 0}
+[hidden]{display:none!important}
+@media(max-width:850px){#province-picker{flex:1 0 100%;width:100%}}
+@media(max-width:580px){.layer-choice{flex:1 0 100%;text-align:left}.layer-description{font-size:11px}}

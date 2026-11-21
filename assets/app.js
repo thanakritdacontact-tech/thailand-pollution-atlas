@@ -201,7 +201,7 @@ async function initialize() {
     state.provinces = geo.features.map(f => ({ code: String(f.properties.code ?? f.properties.pro_code ?? '').padStart(2, '0'), name: String(f.properties.name_th ?? f.properties.pro_th ?? '') }));
     state.provinces.sort((a,b) => a.name.localeCompare(b.name, 'th'));
     const indexed = new Map(data.provinces.map(x => [x.province_code,x.province]));
-    for (const p of state.provinces) if (!indexed.has(p.code) || indexed.get(p.code) !== p.name) throw new Error(`ทะเบียนชื่อหรือรหัสจังหวัดไม่ตรงแผนที่: ${p.code} ${p.name}`);
+    for (const p of state.provinces) { if (!indexed.has(p.code)) throw new Error(`รหัสจังหวัดไม่ตรงทะเบียน: ${p.code}`); p.name = indexed.get(p.code); }
     el('province-picker').innerHTML = '<option value="">เลือกจังหวัด (ครบ 77 จังหวัด)</option>' + state.provinces.map(p => `<option value="${escapeHtml(p.code)}">${escapeHtml(p.name)}</option>`).join('');
     if (new Set(state.provinces.map(p => p.code)).size !== 77) throw new Error('รหัสจังหวัดใน GeoJSON ไม่ครบ 77');
     for (const code of state.byCode.keys()) if (!getProvince(code)) throw new Error(`ไม่พบรหัสจังหวัด ${code} ในแผนที่`);
